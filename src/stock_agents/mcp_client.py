@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import AsyncExitStack
 import json
 import logging
 from dataclasses import dataclass
@@ -19,16 +20,28 @@ class MCPToolCall:
 async def call_tool(call: MCPToolCall, arguments: Dict[str, Any]) -> Any:
     server_params = StdioServerParameters(command="python", args=[call.server_script])
     logger.info("mcp call_tool server=%s tool=%s args=%s", call.server_script, call.tool_name, arguments)
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(call.tool_name, arguments)
-            logger.info("mcp call_tool result_type=%s", type(result))
-            return result.content
+    async with AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(server_params))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        result = await session.call_tool(call.tool_name, arguments)
+        logger.info("mcp call_tool result_type=%s", type(result))
+        return result.content
+
+
+async def call_tools(calls: List[MCPToolCall], arguments_list: List[Dict[str, Any]]) -> List[Any]:
+    if len(calls) != len(arguments_list):
+        raise ValueError("calls and arguments_list must be the same length")
+    tasks = [call_tool(call, arguments) for call, arguments in zip(calls, arguments_list)]
+    return await asyncio.gather(*tasks)
 
 
 def call_tool_sync(call: MCPToolCall, arguments: Dict[str, Any]) -> Any:
     return asyncio.run(call_tool(call, arguments))
+
+
+def call_tools_sync(calls: List[MCPToolCall], arguments_list: List[Dict[str, Any]]) -> List[Any]:
+    return asyncio.run(call_tools(calls, arguments_list))
 
 
 def unwrap_mcp_content(content: Any) -> Any:

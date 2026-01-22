@@ -16,7 +16,7 @@ from stock_agents.news_graph import GraphState, build_graph
 from stock_agents.news_service import NewsService
 from stock_agents.price_service import PriceService
 from stock_agents.rag_store import clear_rag, get_rag_size_bytes
-from stock_agents.ticker import infer_company_name, infer_ticker, normalize_ticker_for_market
+from stock_agents.ticker import infer_company_name, infer_ticker, looks_like_ticker
 
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,13 @@ def _grey_fig(fig: go.Figure) -> go.Figure:
     return faded
 
 
+def _build_stooq_home_url(ticker: str, market: str) -> str:
+    symbol = ticker.strip().lower()
+    if "." in symbol:
+        return f"https://stooq.com/q/?s={symbol}"
+    return f"https://stooq.com/q/?s={symbol}.{market.strip().lower()}"
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _get_price_data(ticker: str, market: str, server_path: str) -> tuple[pd.DataFrame, str]:
     price_service = PriceService(price_server_script=server_path)
@@ -141,8 +148,8 @@ def main() -> None:
 
     with st.sidebar:
         st.header("查询参数")
-        ticker = st.text_input("Ticker (用于股价/可留空自动识别)", value="AAPL")
-        company_name = st.text_input("公司名(用于新闻搜索/可留空自动识别)", value="")
+        search_mode = st.radio("搜索方式", ["模糊搜索", "Ticker Symbol"], index=0, horizontal=True)
+        query_input = st.text_input("搜索内容", value="AAPL")
         market = st.selectbox("市场", ["US", "JP"], index=0)
         range_options = {"3个月": "3m", "1年": "1y", "5年": "5y"}
         range_label = st.radio("时间范围", list(range_options.keys()), index=1, horizontal=True)
@@ -154,25 +161,42 @@ def main() -> None:
         st.metric("RAG 占用 (MB)", f"{rag_size:.2f}")
         st.progress(min(rag_size / 500, 1.0))
 
-    if not ticker and company_name:
-        inferred = infer_ticker(company_name, market)
-        if inferred:
-            ticker = inferred
-            st.sidebar.success(f"已根据公司名识别 ticker: {ticker}")
-    if ticker:
-        normalized = normalize_ticker_for_market(ticker, market)
-        if normalized and normalized != ticker:
-            ticker = normalized
-            st.sidebar.info(f"已根据市场调整 ticker: {ticker}")
+    ticker = ""
+    company_name = ""
+    prefetched_frame = None
+    prefetched_source = ""
+    query_input = query_input.strip()
+    if search_mode == "Ticker Symbol":
+        ticker = query_input
+    else:
+        company_name = query_input
+        if looks_like_ticker(query_input, market):
+            frame, source = _get_price_data(ticker=query_input, market=market, server_path=PRICE_SERVER)
+            if not frame.empty:
+                prefetched_frame = frame
+                prefetched_source = source
+                ticker = query_input
+                company_name = ""
+                st.sidebar.success(f"识别为 ticker: {ticker}")
+            else:
+                st.sidebar.warning("输入像 ticker，但未拉取到价格，将尝试公司名推断。")
+        if not ticker and company_name:
+            inferred = infer_ticker(company_name, market)
+            if inferred:
+                ticker = inferred
+                st.sidebar.success(f"已根据公司名识别 ticker: {ticker}")
     if not ticker:
-        st.info("请输入股票或基金的 ticker，或填写公司名自动识别。")
+        st.info("请输入股票或基金的 ticker，或使用模糊搜索输入公司名。")
         return
 
     st.sidebar.caption(f"MCP price server: {PRICE_SERVER}")
     st.sidebar.caption(f"存在: {Path(PRICE_SERVER).exists()}")
 
     fetch_start = time.perf_counter()
-    frame, source = _get_price_data(ticker=ticker.strip(), market=market, server_path=PRICE_SERVER)
+    if prefetched_frame is not None:
+        frame, source = prefetched_frame, prefetched_source
+    else:
+        frame, source = _get_price_data(ticker=ticker.strip(), market=market, server_path=PRICE_SERVER)
     logger.info("price fetch elapsed=%.3fs", time.perf_counter() - fetch_start)
     if frame.empty:
         st.error("未获取到股价数据，请检查 ticker 与市场。")
@@ -204,7 +228,8 @@ def main() -> None:
         st.error("时间范围内无有效数据。")
         return
 
-    st.caption(f"股价来源: {source}")
+    source_home = _build_stooq_home_url(ticker, market)
+    st.caption(f"股价来源: {source_home}")
     chart_placeholder = st.empty()
     current_key = f"{ticker}-{market}-{range_key}"
     if "last_fig" in st.session_state and st.session_state.get("last_key") != current_key:

@@ -3,25 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from stock_agents.llm_factory import get_chat_model
 
 
-_FALLBACK = {
-    "aapl": "Consumer Electronics",
-    "msft": "Software",
-    "nvda": "Semiconductors",
-    "tsla": "Automobiles",
-    "amzn": "E-Commerce",
-    "goog": "Internet Services",
-    "meta": "Social Media",
-    "7203": "Automobiles",
-    "6758": "Consumer Electronics",
-    "9432": "Telecom",
-}
-
-
 def infer_industry(ticker: str) -> str:
-    normalized = ticker.strip().lower()
-    if normalized in _FALLBACK:
-        return _FALLBACK[normalized]
-
     prompt = ChatPromptTemplate.from_messages(
         [
             (
