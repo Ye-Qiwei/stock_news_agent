@@ -1,0 +1,26 @@
+[project]
+name = "stock-news-agents"
+version = "0.1.0"
+description = "Multi-agent stock price and news explorer with MCP + RAG"
+requires-python = ">=3.10"
+dependencies = [
+  "duckduckgo_search",
+  "langchain",
+  "langchain-community",
+  "langchain-openai",
+  "langchain-text-splitters",
+  "langchain-chroma",
+  "langgraph",
+  "mcp",
+  "pandas",
+  "plotly",
+  "requests",
+  "streamlit",
+  "streamlit-plotly-events",
+]
+
+[project.optional-dependencies]
+local = ["sentence-transformers"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,16 @@
+duckduckgo_search
+langchain
+langchain-community
+langchain-openai
+langchain-text-splitters
+langchain-chroma
+langgraph
+mcp
+pandas
+plotly
+requests
+streamlit
+streamlit-plotly-events
+
+[local]
+sentence-transformers
